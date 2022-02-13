@@ -1,0 +1,246 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AutoScaling Samepl (VPC, AutoScaling)
+
+#
+#Metadata:
+
+Parameters:
+    
+    EnviromentName: #변수값으로 저장하여 리소스들의 공통된 네임 지정
+      Description: Enter Stack Enviroment Name
+      Type: String
+
+    KeyName: #자신의 리전에 있는 keypair 사용하도록 지정
+      Description: Name of KeyPair
+      Type: AWS::EC2::KeyPair::KeyName
+
+Resources:
+
+  # VPC 설정
+  GolbengVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.30.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} VPC
+        - Key: Desc
+          Value: autoscale test
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs ]
+      VpcId: !Ref GolbengVPC
+      CidrBlock: 172.30.0.0/24
+      
+      # 해당 값이 true이면 런치시 공인 IP가 매핑된다. (EC2에)
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} Public Subnet1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 1, !GetAZs ]
+      VpcId: !Ref GolbengVPC
+      CidrBlock: 172.30.1.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} Public Subnet2
+
+  # RoutingTable 필요하다.
+  Public1RoutingTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref GolbengVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} PublicSubnet1 RouteTable
+  
+  Public1LocalRoute:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref Public1RoutingTable
+      SubnetId: !Ref PublicSubnet1
+
+  Public1InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref Public1RoutingTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+
+  Public2RoutingTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref GolbengVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} PublicSubnet2 RouteTable
+
+  Public2LocalRoute:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref Public2RoutingTable
+      SubnetId: !Ref PublicSubnet2
+
+  Public2InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref Public2RoutingTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+  
+  
+  # Internet Geteway
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} Internet Gateway
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref GolbengVPC
+      InternetGatewayId: !Ref IGW
+
+
+
+  # Elatic IP
+  #LoadBalancerElasticIP:
+  #  Type: AWS::EC2::EIP
+
+
+  #Security Group
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: WebAccessSG
+      GroupDescription: allow 20, 80
+      VpcId: !Ref GolbengVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} web SG
+        - Key: Desc
+          Value: autoscale test
+
+  # Load Balancer 설정 그룹
+  # LoadBalancer
+
+  WebServerALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: WebServerALB
+      Type: application
+      SecurityGroups:
+        - !Ref WebServerSecurityGroup
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} ALB LoadBalancer
+
+  WebServerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref GolbengVPC
+      Name: WebTest
+      Port: 80
+      Protocol: HTTP
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+
+      # 해당 초 안에 반응이 없다면 비정상
+      HealthCheckTimeoutSeconds: 5
+
+      # 2번 연속으로 OK 판정이 나야 정상 Instance
+      HealthyThresholdCount: 2
+
+      # 2번 연속으로 Failed 판정이 나야 비정상 Instance
+      UnhealthyThresholdCount: 2
+
+  WebServerALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebServerTargetGroup
+      
+      LoadBalancerArn: !Ref WebServerALB
+      Port: 80
+      Protocol: HTTP
+
+  # Auto Scaling Group 설정 그룹
+
+  # LaunchConfiguration (시작 구성)
+  WebServerLC:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: ami-0b8458bc86f0f54bb
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      LaunchConfigurationName: WebServerLC
+      SecurityGroups:
+        - !Ref WebServerSecurityGroup
+
+      #Tags:
+      #  - Key: Name
+      #    Value: !Sub ${EnviromentName} LaunchConfiguration
+      #  - Key: Desc
+      #    Value: autoscale test
+
+  WebServerAutoScaling:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: WebServer AutoScalingGroup
+      VPCZoneIdentifier:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+
+      # 상태확인 유예 기간 (기본값 300)
+      Cooldown: 10
+      LaunchConfigurationName: !Ref WebServerLC
+      MaxSize: 4
+      MinSize: 2
+      DesiredCapacity: 2
+      TargetGroupARNs:
+        - !Ref WebServerTargetGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} WebServer AutoScaling
+          # EC2들이 해당 태그를 달린 채로 생성된다.
+          PropagateAtLaunch: true
+
+  WebServerASGPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref WebServerAutoScaling
+      PolicyType: TargetTrackingScaling
+
+      # CPU 평균 사용율이 5를 넘어갈 때 Autoscaling이 일어나도록 함..
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 5

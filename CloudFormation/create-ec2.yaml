@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: VPC Configuration Sample(EC2 생성)
+
+Parameters:
+  EnviromentName: #변수값으로 저장하여 리소스들의 공통된 네임 지정
+    Description: Enter Stack Enviroment Name
+    Type: String
+
+  KeyName: #자신의 리전에 있는 keypair 사용하도록 지정
+    Description: Name of KeyPair
+    Type: AWS::EC2::KeyPair::KeyName
+
+Resources:
+  
+  WebServerTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: "WebServerLaunchTemplate"
+      LaunchTemplateData:
+        KeyName: !Ref KeyName
+        ImageId: ami-014009fa4a1467d53
+        InstanceType: t2.micro
+        SecurityGroupIds:
+          - sg-0b9fde6c62874441d
+        UserData:
+          Fn::Base64:
+            !Join ["", [
+              "#!/bin/bash\n",
+              "#Install APM for Web Server \n",
+              "yum install -y php httpd\n",
+              "systemctl enable httpd\n",
+              "systemctl start httpd\n"
+            ]]
+
+  #WebServerEC2:
+  #  Type: AWS::EC2::Instance
+  #  Properties:
+  #    ImageId: ami-014009fa4a1467d53
+  #    InstanceType: t2.micro
+
+  #  UserData:
+  #    Fn:Base64:
+  #      !Join ["", [
+  #        "#!/bin/bash\n",
+  #        "#Install APM for Web Server \n",
+  #        "yum install -y php httpd\n",
+  #        "systemctl enable httpd\n",
+  #        "systemctl start httpd\n"
+  #      ]]

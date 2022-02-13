@@ -1,0 +1,320 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: VPC Configuration Sample(VPC, Subnet 생성)
+
+Metadata: #파라미터들의 그룹들을 Label 작업
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          Default: Network Configuration
+        Parameters:
+          - VpcCIDR
+          - PubCIDR1
+          - PubCIDR2
+          - PriCIDR1
+          - PriCIDR2
+      -
+        Label:
+          Default: Amazon EC2 Configuration
+        Parameters:
+          - InstanceType
+          - KeyName
+          - AMI
+
+#key: value 쌍으로 이루어지며 각기 다른 리전마다의 값을 지정가능
+# 사용자의 환경마다 다르기에 그에 맞는 조건을 매핑해둔것
+
+# Fn::FindInMap을 사용해서 해당 값 이용
+# !FindInMap 
+#   - Regionmap
+#   - !Ref 'AWS::Region'
+#   - Linux2
+Mappings:
+  Regionmap:
+    ap-northeast-2:
+      Linux2: ami-014009fa4a1467d53
+    us-east-1:
+      Ubuntu: ami-0454bb2fefc7de534
+
+# 템플릿 실행 시 사용자가 선택하는 항목을 정의하는 섹션이다.
+# 
+Parameters:
+  EnviromentName: #변수값으로 저장하여 리소스들의 공통된 네임 지정
+    Description: Enter Stack Enviroment Name
+    Type: String
+
+  VpcCIDR:
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: 10.0.0.0/16
+
+  PubCIDR1:
+    Description: Please enter the Ip range (CIDR notation) for the public subnet in first Avaliablety Zone
+    Type: String
+    Default: 10.0.1.0/24
+
+  PubCIDR2:
+    Description: Please enter the Ip range (CIDR notation) for the public subnet in first Avaliablety Zone
+    Type: String
+    Default: 10.0.2.0/24
+
+  PriCIDR1:
+    Description: Please enter the Ip range (CIDR notation) for the private subnet in first Avaliablety Zone
+    Type: String
+    Default: 10.0.64.0/24
+
+  PriCIDR2:
+    Description: Please enter the Ip range (CIDR notation) for the private subnet in first Avaliablety Zone
+    Type: String
+    Default: 10.0.65.0/24
+
+  InstanceType: #인스턴스 타입
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues: # 드록박스 목록으로 해당 타입들을 지정해둔다.
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t2.medium
+
+  AMI:
+    Description: AMI of EC2
+    Type: AWS::EC2::Image::Id
+    Default: ami-014009fa4a1467d53
+    AllowedValues:
+      - ami-014009fa4a1467d53
+      - ami-0454bb2fefc7de534
+
+  KeyName: #자신의 리전에 있는 keypair 사용하도록 지정
+    Description: Name of KeyPair
+    Type: AWS::EC2::KeyPair::KeyName
+
+  SSHLocation:
+    Description: The IP address Range That can be used to ssh to the EC2 instance
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+
+# 스택이 프로덕션용인지 테스트 환경 용인지에 따라 달라지는 리소스를 조건부로 생성
+#Conditions:
+
+
+# 해당 섹션에서 리소스를 생성, 업데이트하기 전에 파라미터 값 검증
+#Rules:
+
+# 실제 리소스 생성 되는 부분 (Resources)
+Resources:
+  #vpc 생성
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: 'true'  #VPC DNS 활성화
+      EnableDnsHostnames: 'true' #VPC의 DNS호스트네임 활성화
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} VPC #변수값으로 지정된 이름 호출
+
+  #서브넷 생성
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs ]
+      # GetAZs옵션은 리전의 가용영역을 알파벳 순으로 나열하여 반환한다.
+      # ex 서울리전의 경우 4개의 az이므로 a,b,c,d 순으로
+      # Select 내장함수를 이용해 나열된 abcd의 az를 인덱스값으로 지정
+
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref PubCIDR1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} Public Subnet 1
+
+  #서브넷 생성
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs ]
+      # GetAZs옵션은 리전의 가용영역을 알파벳 순으로 나열하여 반환한다.
+      # ex 서울리전의 경우 4개의 az이므로 a,b,c,d 순으로
+      # Select 내장함수를 이용해 나열된 abcd의 az를 인덱스값으로 지정
+
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref PriCIDR1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} private Subnet 1
+
+  # Internet Gateway
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} IGW
+  
+  
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref IGW
+
+  # EIP
+  NatEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      #Domain: vpc
+      #InstanceId: !Ref EC2forWeb
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} NAT-EIP
+
+  #EC2-EIP:
+  #  Type: AWS::EC2::EIP
+  #  Properties:
+  #    Domain: vpc
+  #    InstanceId: !Ref EC2forWeb
+  #    Tags:
+  #      - Key: Name
+  #        Value: !Sub ${EnviromentName} NAT-EIP
+
+  # NAT Gatewway
+  NAT:
+    Type: AWS::EC2::NatGateway
+    
+    # DependsOn는 해당 리소스가 다 만들어진 후에 생성될 수 있도록 해준다.
+    DependsOn: AttachGateway
+    Properties:
+
+      # GetAtt : 해당 속성 값을 뽑아낸다. (Ref 해당 리소스의 논리적 ID를 반환)
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} NAT
+
+
+  # public Route Table
+  PublicRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} public 1 RT
+
+  PublicSubnetRoute1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1
+      SubnetId: !Ref PublicSubnet1
+
+  PublicInternetRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      # internet gateWay
+      GatewayId: !Ref IGW
+
+  # private Route Table
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} private 1 RT
+  
+  PrivateSubnetRoute1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateNatRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NAT
+
+  #Security Group
+  SGForWeb:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: WebAccessSG
+      GroupDescription: allow 20, 80
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} web SG
+
+  #EC2
+  EC2forWeb:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      KeyName: !Ref KeyName
+
+      AvailabilityZone: !GetAtt PublicSubnet1.AvailabilityZone
+      InstanceType: !Ref InstanceType
+      
+      #SubnetId: !Ref PublicSubnet1
+      #SecurityGroups:
+      #  - !Ref Ec2SecurityGroup
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeleteOnTermination: true
+          DeviceIndex: 0
+          SubnetId: !Ref PublicSubnet1
+          Description: !Sub "${EnviromentName} Network Interface"
+          
+          GroupSet:
+            - !Ref SGForWeb
+
+      # ebs 할당
+      #BlockDeviceMappings:
+      #  - DeviceName: "/dev/sda1"
+      #    Ebs:
+      #      VolumeType: "gp2"
+      #      VolumeSize: "8"
+      #      Encrypted: true
+      #      DeleteOnTermination: true
+      
+      UserData:
+        Fn::Base64:
+          !Join [ "", [
+          "#!/bin/bash\n",
+          "#Install APM for Web Server \n",
+          "yum install -y php httpd\n",
+          "systemctl enable httpd\n",
+          "systemctl start httpd\n"
+          ]]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnviromentName} web Instance
+
+
+Outputs:
+  InstanceId:
+    Description: Id of the newly created AWS EC2 instance
+    Value: !Ref EC2forWeb
